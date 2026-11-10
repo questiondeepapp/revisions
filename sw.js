@@ -1,5 +1,5 @@
 /* Service worker : garde l'app en cache pour qu'elle s'ouvre sans réseau. */
-const CACHE = 'annales-1ddff2ee9b04';
+const CACHE = 'annales-88c504524ebe';
 const FICHIERS = ["./", "app.css", "app.js", "apple-touch-icon.png", "donnees.bin", "favicon.png", "fonts.css", "fonts/atkinson-hyperlegible-latin-400-normal.woff2", "fonts/atkinson-hyperlegible-latin-700-normal.woff2", "fonts/atkinson-hyperlegible-latin-ext-400-normal.woff2", "fonts/atkinson-hyperlegible-latin-ext-700-normal.woff2", "fonts/bricolage-grotesque-latin-600-normal.woff2", "fonts/bricolage-grotesque-latin-700-normal.woff2", "fonts/bricolage-grotesque-latin-ext-600-normal.woff2", "fonts/bricolage-grotesque-latin-ext-700-normal.woff2", "fonts/jetbrains-mono-latin-500-normal.woff2", "fonts/jetbrains-mono-latin-700-normal.woff2", "fonts/jetbrains-mono-latin-ext-500-normal.woff2", "fonts/jetbrains-mono-latin-ext-700-normal.woff2", "icon-192.png", "icon-512.png", "icon-maskable-512.png", "index.html", "manifest.webmanifest"];
 
 self.addEventListener('install', e => {

@@ -28,7 +28,7 @@ DATA.subjects.forEach(s => {
 });
 const subjQuestions = s => s.dossiers.flatMap(d => d.questions);
 const scoredCount = s => subjQuestions(s).filter(q => q.scored).length;
-const kindLabel = { QI: 'Questions isolées', SQI: 'Questions isolées', DP: 'Dossier progressif', KFP: 'KFP', mDP: 'Mini-dossier progressif' };
+const kindLabel = { QI: 'Questions isolées', SQI: 'Questions isolées', DP: 'Dossier progressif', KFP: 'KFP', mDP: 'Mini-dossier progressif', TCS: 'TCS · situation commune' };
 const isSingle = q => q.type === 'QRU' || q.type === 'TCS';
 
 /* ------------------------------------------------------------------ stockage local */
@@ -158,7 +158,7 @@ function renderQuestion(q, a, mode, opts = {}) {
   if (q.type === 'QRM' || isSingle(q)) {
     const mx = maxSel(q), sel = a || [];
     if (!review) {
-      const hint = q.type === 'TCS' ? 'Une seule réponse : ton hypothèse est-elle affaiblie, inchangée ou renforcée ?' : q.type === 'QRU' ? 'Une seule réponse possible' : isXN(q) ? `<span><b>${mx}</b> réponses attendues — sélection limitée à ${mx}</span><span class="cnt">${sel.length} / ${mx}</span>` : 'Une ou plusieurs réponses';
+      const hint = q.type === 'TCS' ? 'Une seule réponse : que devient ton hypothèse avec cette nouvelle information ?' : q.type === 'QRU' ? 'Une seule réponse possible' : isXN(q) ? `<span><b>${mx}</b> réponses attendues — sélection limitée à ${mx}</span><span class="cnt">${sel.length} / ${mx}</span>` : 'Une ou plusieurs réponses';
       h += `<div class="hint">${hint}</div>`;
     } else if (isXN(q)) h += `<div class="hint"><span><b>${mx}</b> réponses attendues</span></div>`;
     const corr = corrLetters(q);
@@ -193,6 +193,7 @@ function renderQuestion(q, a, mode, opts = {}) {
   }
   if (review) {
     const s = opts.score;
+    if (q.s.unofficial) h += `<div class="banner small">Corrigé non officiel (reconstitué) : réponses et barème à prendre avec recul.</div>`;
     if (s === 'pending') h += `<div class="verdict mid"><div>Ta réponse ne correspond pas mot pour mot à la réponse attendue. Note-toi honnêtement :</div><div class="row">${[[1, 'Juste · 1'], [0.5, 'Partiel · 0,5'], [0, 'Faux · 0']].map(([v, l]) => `<button class="btn sm ghost" data-act="${opts.evalAct || 'reval'}" data-key="${esc(q.key)}" data-v="${v}">${l}</button>`).join('')}</div></div>`;
     else if (q.scored && !opts.noVerdict) h += `<div class="verdict ${s >= 0.999 ? 'good' : s > 0 ? 'mid' : 'zero'}"><span class="big">${fmtScore(s)} / 1</span><span class="small">${esc(scoreWhy(q, a, s))}</span></div>`;
     const notes = q.notes.filter(Boolean);
@@ -439,6 +440,7 @@ function answeredCount(at) { return Object.keys(at.ans).filter(k => QIDX[k] && i
 function viewSubject() {
   const s = SUBJ[ui.screen.sid]; const st = subjStatus(s.id); const total = subjQuestions(s).length;
   let h = topbar(esc(s.title), `${esc(s.matiere)} · ${esc(s.source)}`, 'back-tab');
+  if (s.unofficial) h += `<div class="banner">Ce sujet n'a pas de correction officielle : le corrigé a été reconstitué. Certaines questions sont signalées « barème discutable » ou « nuance » dans les remarques.</div>`;
   h += `<section class="panel"><dl class="kv"><dt>Questions</dt><dd>${total} (${scoredCount(s)} notées)</dd><dt>Dossiers</dt><dd>${s.dossiers.map(d => `${d.id} (${d.questions.length})`).join(' · ')}</dd><dt>Passages</dt><dd>${st.done.length} terminé${st.done.length > 1 ? 's' : ''}</dd>${st.last ? `<dt>Dernier</dt><dd><b class="score">${fmt(st.last.result.note20)}/20</b> · ${dateFr(st.last.end)}</dd><dt>Meilleur</dt><dd><b class="score">${fmt(st.best)}/20</b></dd>` : ''}</dl></section>`;
   if (st.run) {
     h += `<button class="btn block" data-act="exam-resume" data-id="${st.run.id}">Reprendre (${answeredCount(st.run)}/${total} répondues)</button>`;
@@ -585,7 +587,7 @@ function viewReglages() {
   <li><b>6 propositions ou plus</b> : le nombre de réponses attendues est affiché, la sélection est limitée à ce nombre, note = bonnes réponses cochées / réponses attendues.</li>
   <li><b>QROC</b> : réponse reconnue automatiquement si elle correspond à la correction (majuscules, accents, articles et pluriels ignorés). Sinon tu t'auto-évalues : 1, 0,5 ou 0. En mode examen, à la fin du sujet.</li>
   <li><b>Association</b> : proportion d'éléments bien associés.</li>
-  <li><b>TCS</b> : un seul choix (affaiblie, inchangée, renforcée) ; note = part du panel d'experts ayant fait ce choix.</li>
+  <li><b>TCS</b> : un seul choix sur l'échelle proposée ; note = part du panel d'experts ayant fait ce choix.</li>
   <li>Questions annulées ou neutralisées par la fac : affichées, non comptées. Propositions neutralisées : ignorées.</li>
   <li><b>Note /20</b> : moyenne des questions notées × 20.</li></ul>
   <p class="small muted" style="margin:0">Référence : CNG, Règles générales de notation R2C, 31/01/2023.</p></section>`;
