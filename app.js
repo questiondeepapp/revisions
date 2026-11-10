@@ -142,6 +142,21 @@ function contextBox(d, open) {
   if (!d.isBlock || !d.context.length) return '';
   return `<details class="context" ${open ? 'open' : ''}><summary>Énoncé du dossier ${esc(d.id)}${d.title ? ' — ' + esc(d.title) : ''}</summary>${blocks(d.context)}</details>`;
 }
+/* Mixte : l'énoncé de départ reste repliable, l'énoncé de la question précédente reste toujours visible */
+function prevInfo(q) {
+  if (!q.d.isBlock) return '';
+  const i = q.d.questions.indexOf(q); if (i <= 0) return '';
+  const p = q.d.questions[i - 1];
+  return `<div class="context prev"><span class="eyebrow">Énoncé de la question ${p.n}</span>${blocks(p.stem)}</div>`;
+}
+function dossierNav(d, current, opts) {
+  /* questions déjà passées : consultables en lecture seule ; question en cours ; suivantes : fermées */
+  return `<nav class="qnav" aria-label="Questions du dossier">${d.questions.map((x, i) => {
+    if (i < current) return `<button data-act="${opts.act}" data-i="${opts.target ? opts.target(i) : i}" class="done" ${opts.viewing === i ? 'aria-current="true"' : ''} aria-label="Revoir la question ${x.n}">${x.n}</button>`;
+    if (i === current) return `<button data-act="${opts.backAct}" ${opts.viewing == null ? 'aria-current="true"' : ''} aria-label="Question en cours">${x.n}</button>`;
+    return `<button disabled aria-label="Question ${x.n}, pas encore accessible">${x.n}</button>`;
+  }).join('')}</nav>`;
+}
 function typeLabel(q) {
   if (q.type === 'QRU') return 'QRU';
   if (q.type === 'TCS') return 'TCS';
@@ -152,7 +167,7 @@ function typeLabel(q) {
 
 /* rendu d'une question. mode : 'answer' | 'review' */
 function renderQuestion(q, a, mode, opts = {}) {
-  const review = mode === 'review';
+  const review = mode === 'review'; const ro = !!opts.readonly;
   let h = `<div class="stem">${blocks(q.stem)}</div>`;
   if (!q.scored) h += `<div class="banner">${esc(q.status || 'Question non comptée')}</div>`;
   if (q.type === 'QRM' || isSingle(q)) {
@@ -176,10 +191,11 @@ function renderQuestion(q, a, mode, opts = {}) {
         if (q.type === 'TCS' && q.weights) tags += `<span class="tag neu">panel : ${fmt(q.weights[p.l] || 0)}</span>`;
       }
       const ex = review ? q.expl.filter(e => e.l === p.l).map(e => `<div class="expl">${esc(e.t)}</div>`).join('') : '';
-      return `<button class="opt ${cls}" ${review ? 'disabled' : `data-act="opt" data-l="${p.l}"`} aria-pressed="${on}"><span class="bubble">${p.l}</span><span class="txt">${esc(p.t)}${tags ? `<span class="tags">${tags}</span>` : ''}${ex}</span></button>`;
+      return `<button class="opt ${cls}" ${review || ro ? 'disabled' : `data-act="opt" data-l="${p.l}"`} aria-pressed="${on}"><span class="bubble">${p.l}</span><span class="txt">${esc(p.t)}${tags ? `<span class="tags">${tags}</span>` : ''}${ex}</span></button>`;
     }).join('') + '</div>';
   } else if (q.type === 'QROC') {
-    if (!review) h += `<label class="hint" for="qroc-in">Réponse courte (1 à 5 mots)</label><input class="text-in" id="qroc-in" data-act="qroc" data-key="${esc(q.key)}" value="${esc(a || '')}" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done">`;
+    if (ro) h += `<div class="verdict info"><div><span class="muted small">Ta réponse</span><br><b>${esc(a && String(a).trim() ? a : '— pas de réponse —')}</b></div></div>`;
+    else if (!review) h += `<label class="hint" for="qroc-in">Réponse courte (1 à 5 mots)</label><input class="text-in" id="qroc-in" data-act="qroc" data-key="${esc(q.key)}" value="${esc(a || '')}" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done">`;
     else {
       h += `<div class="verdict info"><div><span class="muted small">Ta réponse</span><br><b>${esc(a && a.trim() ? a : '— pas de réponse —')}</b></div><div><span class="muted small">Réponse attendue</span><br><b>${esc((q.accepted || []).join(' / ') || q.answer)}</b></div></div>`;
     }
@@ -188,7 +204,7 @@ function renderQuestion(q, a, mode, opts = {}) {
       q.items.map((it, i) => {
         const v = (a || [])[i] || '';
         if (review) { const c = q.answer[i]; return `<div class="assoc-row ${v === c ? 'ok' : 'bad'}"><span>${i + 1}. ${esc(it)}</span><span class="small">Ta réponse : <b>${esc(v || '—')}</b> · attendue : <b>${esc(c)}</b></span></div>`; }
-        return `<div class="assoc-row"><label for="as-${i}">${i + 1}. ${esc(it)}</label><select id="as-${i}" data-act="assoc" data-i="${i}" data-key="${esc(q.key)}"><option value="">— choisir —</option>${q.props.map(p => `<option value="${p.l}" ${v === p.l ? 'selected' : ''}>${p.l} — ${esc(p.t.length > 60 ? p.t.slice(0, 58) + '…' : p.t)}</option>`).join('')}</select></div>`;
+        return `<div class="assoc-row"><label for="as-${i}">${i + 1}. ${esc(it)}</label><select id="as-${i}" ${ro ? 'disabled' : `data-act="assoc" data-i="${i}" data-key="${esc(q.key)}"`}><option value="">— choisir —</option>${q.props.map(p => `<option value="${p.l}" ${v === p.l ? 'selected' : ''}>${p.l} — ${esc(p.t.length > 60 ? p.t.slice(0, 58) + '…' : p.t)}</option>`).join('')}</select></div>`;
       }).join('') + '</div>';
   }
   if (review) {
@@ -255,11 +271,27 @@ function startRevision() {
   render(true);
 }
 function viewRevSession() {
-  const S = ui.screen; const q = QIDX[S.keys[S.i]]; const a = S.ans[q.key];
+  const S = ui.screen;
+  const cur = QIDX[S.keys[S.i]];
+  const pos = cur.d.isBlock && !S.carnet ? S.keys.map((k, j) => [k, j]).filter(([k]) => QIDX[k].d === cur.d) : [];
+  const curIdx = pos.findIndex(([, j]) => j === S.i);
+  const navDossier = curIdx > 0 && !S.fromSummary;
+  if (navDossier && S.view != null && S.view < S.i) {
+    const v = QIDX[S.keys[S.view]]; const vIdx = pos.findIndex(([, j]) => j === S.view);
+    let h = topbar(`Révision · ${esc(v.d.id)} Q${v.n}`, 'Lecture seule · ' + esc(v.s.title), 'rev-quit');
+    h += dossierNav(cur.d, curIdx, { act: 'rev-view', backAct: 'rev-current', viewing: vIdx, target: i => pos[i][1] });
+    h += contextBox(v.d, vIdx === 0) + prevInfo(v);
+    h += `<section class="panel"><div class="banner small">Question déjà corrigée : relecture seule.</div>${qHead(v, `${v.d.id} · Q${v.n}/${v.d.questions.length}`)}${renderQuestion(v, S.ans[v.key], 'review', { score: S.sc[v.key], readonly: true })}</section>`;
+    h += `<div class="actionbar"><div class="inner"><button class="btn" data-act="rev-current">Revenir à la Q${cur.n}</button></div></div>`;
+    return h;
+  }
+  delete S.view;
+  const q = cur; const a = S.ans[q.key];
   const firstOfDossier = S.i === 0 || QIDX[S.keys[S.i - 1]].d !== q.d;
   const label = q.d.isBlock ? `${q.d.id} · Q${q.n}/${q.d.questions.length}` : `Question ${S.i + 1}`;
   let h = topbar(`${S.carnet ? 'Carnet' : 'Révision'} · ${S.i + 1}/${S.keys.length}`, `${esc(S.matiere)} · ${esc(q.s.title)}`, 'rev-quit');
-  h += S.carnet ? contextBox(q.d, true) + prevStems(q) : contextBox(q.d, firstOfDossier);
+  if (navDossier) h += dossierNav(q.d, curIdx, { act: 'rev-view', backAct: 'rev-current', viewing: null, target: i => pos[i][1] });
+  h += S.carnet ? contextBox(q.d, true) + prevStems(q) : contextBox(q.d, firstOfDossier) + prevInfo(q);
   const sc = S.sc[q.key]; const showAnnot = S.phase === 'review' && typeof sc === 'number' && sc < 0.999 && store.carnet[q.key];
   h += `<section class="panel">${qHead(q, label)}${renderQuestion(q, a, S.phase === 'answer' ? 'answer' : 'review', { score: sc, evalAct: 'rev-eval' })}${showAnnot ? annotBox(q.key) : ''}</section>`;
   const last = S.i === S.keys.length - 1;
@@ -477,9 +509,20 @@ function viewExamDossier() {
   if (d.isBlock) { idx = d.questions.findIndex(q => !at.locked[q.key]); if (idx < 0) { go({ type: 'exam', id: at.id }); return ''; } }
   else idx = Math.min(ui.screen.idx || 0, d.questions.length - 1);
   at.pos[d.id] = idx; const q = d.questions[idx];
+  const view = d.isBlock && ui.screen.view != null && ui.screen.view < idx ? ui.screen.view : null;
+  if (view != null) {
+    const v = d.questions[view];
+    let h = topbar(`${esc(d.id)} · Q${v.n}/${d.questions.length}`, 'Lecture seule · ' + esc(d.title || kindLabel[d.kind]), 'exam-sommaire');
+    h += dossierNav(d, idx, { act: 'exam-view', backAct: 'exam-current', viewing: view });
+    h += contextBox(d, view === 0) + prevInfo(v);
+    h += `<section class="panel"><div class="banner small">Question déjà validée : tu peux la relire avec ta réponse, plus la modifier.</div>${qHead(v, 'Question ' + v.n)}${renderQuestion(v, at.ans[v.key], 'answer', { readonly: true })}</section>`;
+    h += `<div class="actionbar"><div class="inner"><button class="btn ghost" data-act="exam-view" data-i="${view - 1}" ${view === 0 ? 'disabled' : ''}>Précédente</button><button class="btn" data-act="exam-current">Revenir à la Q${q.n}</button></div></div>`;
+    return h;
+  }
   let h = topbar(`${esc(d.id)} · Q${q.n}/${d.questions.length}`, esc(d.title || kindLabel[d.kind]), 'exam-sommaire');
   if (!d.isBlock) h += `<nav class="qnav" aria-label="Questions">${d.questions.map((x, i) => `<button data-act="exam-jump" data-i="${i}" class="${isAnswered(x, at.ans[x.key]) ? 'done' : ''}" ${i === idx ? 'aria-current="true"' : ''}>${x.n}</button>`).join('')}</nav>`;
-  h += contextBox(d, idx === 0);
+  else if (idx > 0) h += dossierNav(d, idx, { act: 'exam-view', backAct: 'exam-current', viewing: null });
+  h += contextBox(d, idx === 0) + prevInfo(q);
   h += `<section class="panel">${qHead(q, 'Question ' + q.n)}${renderQuestion(q, at.ans[q.key], 'answer')}</section>`;
   if (d.isBlock) {
     const empty = !isAnswered(q, at.ans[q.key]);
@@ -547,7 +590,7 @@ function viewResultDetail() {
   const at = findAttempt(ui.screen.id); const items = resultList(at, ui.screen.filter || 'all'); const i = ui.screen.detail; const q = items[i];
   const sc = scoreQ(q, at.ans[q.key], at.ev[q.key]);
   let h = topbar(`${esc(q.d.id)} · Q${q.n}`, `Correction ${i + 1}/${items.length}`, 'res-back');
-  h += contextBox(q.d, false);
+  h += contextBox(q.d, false) + prevInfo(q);
   h += `<section class="panel">${qHead(q, 'Question ' + q.n)}${renderQuestion(q, at.ans[q.key], 'review', { score: sc })}${typeof sc === 'number' && sc < 0.999 && store.carnet[q.key] && !store.carnet[q.key].archived ? annotBox(q.key) : ''}</section>`;
   h += `<div class="actionbar"><div class="inner"><button class="btn ghost" data-act="res-prev" ${i === 0 ? 'disabled' : ''}>Précédente</button><button class="btn" data-act="res-next" ${i === items.length - 1 ? 'disabled' : ''}>Suivante</button></div></div>`;
   return h;
@@ -701,6 +744,10 @@ app.addEventListener('click', e => {
     case 'exam-sommaire': go({ type: 'exam', id: sc.id }); break;
     case 'exam-dossier': { const at = findAttempt(sc.id); go({ type: 'dossier', id: sc.id, did: el.dataset.did, idx: at.pos[el.dataset.did] || 0 }); break; }
     case 'exam-jump': sc.idx = +el.dataset.i; render(true); break;
+    case 'exam-view': sc.view = +el.dataset.i; render(true); break;
+    case 'exam-current': delete sc.view; render(true); break;
+    case 'rev-view': sc.view = +el.dataset.i; render(true); break;
+    case 'rev-current': delete sc.view; render(true); break;
     case 'exam-prev': sc.idx = Math.max(0, sc.idx - 1); render(true); break;
     case 'exam-next': sc.idx = sc.idx + 1; render(true); break;
     case 'exam-lock': {

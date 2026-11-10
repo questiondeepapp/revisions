@@ -184,3 +184,7 @@ textarea.dump { width: 100%; min-height: 140px; border: 1.5px solid var(--line);
 .bar-row.wide .lbl { font-family: var(--font-body); font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .item .meta .clip { flex-basis: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .item .meta { min-width: 0; }
+
+/* Fil du dossier */
+.context.prev { border-left-style: dashed; background: var(--surface); border: 1px solid var(--line); border-left: 4px dashed var(--accent); }
+.qnav button[disabled] { opacity: .4; cursor: not-allowed; }
