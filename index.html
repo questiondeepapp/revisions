@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Révision Annales</title>
+<meta name="description" content="Révision personnelle">
+<meta name="theme-color" content="#2C47CF">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Annales">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="fonts.css">
+<link rel="stylesheet" href="app.css">
+<style>
+:root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+body { margin: 0; } img { max-width: 100%; } [hidden] { display: none !important; }
+.lock { min-height: 80vh; justify-content: center; }
+.lock h1 { font-family: var(--font-display); font-size: 1.6rem; margin: 0; letter-spacing: -0.01em; }
+.lock input[type=password] { width: 100%; border: 1.5px solid var(--line); border-radius: 12px; padding: 12px 14px; background: var(--surface); font-size: 1.04rem; }
+.lock input[type=password]:focus { border-color: var(--accent); }
+.lock .err { color: var(--bad); font-weight: 700; margin: 0; }
+.lock .wait { color: var(--muted); margin: 0; }
+</style>
+</head>
+<body>
+<div id="app" aria-live="polite">
+  <main class="wrap no-tabs lock" id="verrou" hidden>
+    <div class="brand"><span class="brand-mark">A·B·C·D·E</span></div>
+    <h1>Révision Annales</h1>
+    <form class="panel" id="f-verrou" autocomplete="on">
+      <label for="mdp" class="eyebrow">Mot de passe</label>
+      <input type="text" name="username" value="annales" autocomplete="username" hidden>
+      <input type="password" id="mdp" name="password" autocomplete="current-password" required>
+      <button class="btn block" type="submit" id="b-ouvrir">Ouvrir</button>
+      <p class="err" id="err" hidden></p>
+      <p class="small muted" style="margin:0">À saisir une seule fois sur cet appareil.</p>
+    </form>
+  </main>
+  <main class="wrap no-tabs lock" id="charge"><p class="wait">Chargement…</p></main>
+</div>
+<script>
+(function () {
+  'use strict';
+  var CLE = 'annales-cle-v1', ITER = 600000;
+  var $ = function (id) { return document.getElementById(id); };
+  var b64 = {
+    enc: function (u8) { var s = ''; for (var i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]); return btoa(s); },
+    dec: function (s) { var b = atob(s), u = new Uint8Array(b.length); for (var i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; }
+  };
+  function lireCle() { try { var v = localStorage.getItem(CLE); return v ? b64.dec(v) : null; } catch (e) { return null; } }
+  function ecrireCle(k) { try { localStorage.setItem(CLE, b64.enc(k)); } catch (e) {} }
+  function oublierCle() { try { localStorage.removeItem(CLE); } catch (e) {} }
+
+  var paquet = null;
+  function telecharger() {
+    if (paquet) return Promise.resolve(paquet);
+    return fetch('donnees.bin').then(function (r) {
+      if (!r.ok) throw new Error('reseau');
+      return r.arrayBuffer();
+    }).then(function (buf) {
+      var u = new Uint8Array(buf);
+      if (String.fromCharCode(u[0], u[1], u[2], u[3]) !== 'ANN1') throw new Error('format');
+      paquet = { sel: u.slice(4, 20), iv: u.slice(20, 32), ct: u.slice(32) };
+      return paquet;
+    });
+  }
+  function deriver(mdp, sel) {
+    var s = crypto.subtle;
+    return s.importKey('raw', new TextEncoder().encode(mdp), 'PBKDF2', false, ['deriveBits'])
+      .then(function (base) { return s.deriveBits({ name: 'PBKDF2', salt: sel, iterations: ITER, hash: 'SHA-256' }, base, 256); })
+      .then(function (bits) { return new Uint8Array(bits); });
+  }
+  function dechiffrer(cleBrute, p) {
+    var s = crypto.subtle;
+    return s.importKey('raw', cleBrute, 'AES-GCM', false, ['decrypt'])
+      .then(function (k) { return s.decrypt({ name: 'AES-GCM', iv: p.iv }, k, p.ct); })
+      .then(function (gz) {
+        var flux = new Blob([gz]).stream().pipeThrough(new DecompressionStream('gzip'));
+        return new Response(flux).text();
+      })
+      .then(function (txt) { return JSON.parse(txt); });
+  }
+  function demarrer(obj) {
+    window.ANNALES_DATA = obj.data;
+    window.ANNALES_IMG = obj.img;
+    var sc = document.createElement('script');
+    sc.src = 'app.js';
+    document.body.appendChild(sc);
+  }
+  function montrerVerrou(msg) {
+    $('charge').hidden = true; $('verrou').hidden = false;
+    if (msg) { $('err').textContent = msg; $('err').hidden = false; }
+    setTimeout(function () { $('mdp').focus(); }, 50);
+  }
+
+  if (!window.crypto || !crypto.subtle || typeof DecompressionStream === 'undefined') {
+    $('charge').innerHTML = '<p class="err">Ce navigateur est trop ancien pour ouvrir l’app. Mets à jour Chrome, Safari ou Firefox.</p>';
+    return;
+  }
+
+  var cle = lireCle();
+  telecharger().then(function (p) {
+    if (!cle) return montrerVerrou();
+    return dechiffrer(cle, p).then(demarrer, function () { oublierCle(); montrerVerrou(); });
+  }).catch(function () {
+    $('charge').innerHTML = '<p class="err">Impossible de charger les données. Vérifie la connexion internet pour la première ouverture.</p>';
+  });
+
+  $('f-verrou').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var mdp = $('mdp').value; if (!mdp) return;
+    var b = $('b-ouvrir'); b.disabled = true; b.textContent = 'Ouverture…'; $('err').hidden = true;
+    telecharger().then(function (p) {
+      return deriver(mdp, p.sel).then(function (k) {
+        return dechiffrer(k, p).then(function (obj) { ecrireCle(k); demarrer(obj); });
+      });
+    }).catch(function () {
+      b.disabled = false; b.textContent = 'Ouvrir';
+      montrerVerrou('Mot de passe incorrect.');
+      $('mdp').select();
+    });
+  });
+
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').then(function (r) { r.update(); }).catch(function () {}); });
+  }
+})();
+</script>
+</body>
+</html>
