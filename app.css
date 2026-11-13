@@ -188,3 +188,15 @@ textarea.dump { width: 100%; min-height: 140px; border: 1.5px solid var(--line);
 /* Fil du dossier */
 .context.prev { border-left-style: dashed; background: var(--surface); border: 1px solid var(--line); border-left: 4px dashed var(--accent); }
 .qnav button[disabled] { opacity: .4; cursor: not-allowed; }
+
+/* Cycles */
+.cycles { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 6px; }
+.cyc { border: 1.5px solid var(--line); background: var(--surface); border-radius: 12px; padding: 7px 8px; display: flex; flex-direction: column; align-items: flex-start; gap: 0; min-width: 0; text-align: left; }
+.cyc b { font-family: var(--font-mono); font-size: .9rem; }
+.cyc span { font-size: .74rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.cyc[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.cyc[aria-pressed="true"] b { color: var(--accent); }
+.cyc[disabled] { opacity: .45; cursor: not-allowed; border-style: dashed; }
+.cyc-card[aria-disabled="true"] { opacity: .5; border-style: dashed; }
+.ai-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 4px; }
+.ai-btn { text-decoration: none; }

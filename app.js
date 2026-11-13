@@ -16,10 +16,15 @@ const scClass = s => s == null ? 'na' : s >= 0.999 ? 'good' : s > 0 ? 'mid' : 'z
 const imgSrc = p => IMGS[p] || p;
 
 /* ------------------------------------------------------------------ index des données */
-const SUBJ = {}, QIDX = {}, MATIERES = [];
+const SUBJ = {}, QIDX = {};
+let MATIERES = [];
+DATA.subjects.forEach(s => { if (!s.cycle) s.cycle = 'C10'; });
+const CYCLES = (DATA.cycles || [{ id: 'C10', label: '' }]).map(c => ({ ...c, n: DATA.subjects.filter(s => s.cycle === c.id).length }));
+const CYCLE_KEY = 'annales-cycle';
+const cycleLabel = id => { const c = CYCLES.find(x => x.id === id); return c ? `${c.id}${c.label ? ' · ' + c.label : ''}` : id; };
+function matieresOf(cycle) { const out = []; DATA.subjects.forEach(s => { if (s.cycle === cycle && !out.includes(s.matiere)) out.push(s.matiere); }); return out; }
 DATA.subjects.forEach(s => {
   SUBJ[s.id] = s;
-  if (!MATIERES.includes(s.matiere)) MATIERES.push(s.matiere);
   s.dossiers.forEach(d => {
     d.sid = s.id;
     d.isBlock = !(d.kind === 'QI' || d.kind === 'SQI');
@@ -110,10 +115,35 @@ function scoreWhy(q, a, s) {
 /* ------------------------------------------------------------------ état d'interface */
 const ui = {
   tab: 'reviser', screen: null,
-  rev: { matiere: MATIERES[0], n: 25, content: 'mix', pool: 'all', subjects: null },
+  cycle: null,
+  rev: { matiere: null, n: 25, content: 'mix', pool: 'all', subjects: null },
   carnet: { matiere: 'all', status: 'active', cause: 'all', n: 10 }, noteT: null,
   armed: null, toastT: null
 };
+function setCycle(id, persist) {
+  ui.cycle = id; MATIERES = matieresOf(id);
+  ui.rev.matiere = MATIERES[0] || null; ui.rev.subjects = null; ui.carnet.matiere = 'all';
+  if (persist) { try { localStorage.setItem(CYCLE_KEY, id); } catch (e) {} }
+}
+(function initCycle() {
+  let saved = null; try { saved = localStorage.getItem(CYCLE_KEY); } catch (e) {}
+  const valid = id => CYCLES.some(c => c.id === id && c.n);
+  if (saved && valid(saved)) return setCycle(saved);
+  const used = Object.keys(store.attempts).length || Object.keys(store.rev).length;
+  if (used && valid('C10')) return setCycle('C10', true);
+  if (CYCLES.filter(c => c.n).length === 1) return setCycle(CYCLES.find(c => c.n).id, true);
+})();
+function cycleBar() {
+  return `<nav class="cycles" aria-label="Cycle">${CYCLES.map(c => c.n
+    ? `<button class="cyc" data-act="cycle" data-v="${c.id}" aria-pressed="${ui.cycle === c.id}"><b>${c.id}</b><span>${esc(c.label)}</span></button>`
+    : `<button class="cyc" disabled aria-label="${c.id} ${esc(c.label)}, bientôt"><b>${c.id}</b><span>${esc(c.label)} · bientôt</span></button>`).join('')}</nav>`;
+}
+function viewCycleChoice() {
+  return `<header class="top"><div class="brand"><span class="brand-mark">A·B·C·D·E</span></div><h1>Quel cycle révises-tu ?<span class="sub">Tu pourras en changer à tout moment, en haut de l'écran</span></h1></header>
+  <div class="list">${CYCLES.map(c => c.n
+    ? `<button class="item cyc-card" data-act="cycle" data-v="${c.id}"><span class="name">${c.id} · ${esc(c.label)}</span><span class="pill none">${c.n} sujet${c.n > 1 ? 's' : ''}</span><span class="meta">${matieresOf(c.id).map(m => `<span>${esc(m)}</span>`).join('')}</span></button>`
+    : `<div class="item cyc-card" aria-disabled="true"><span class="name">${c.id} · ${esc(c.label)}</span><span class="pill none">bientôt</span></div>`).join('')}</div>`;
+}
 function toast(msg) {
   let t = document.querySelector('.toast'); if (!t) { t = document.createElement('div'); t.className = 'toast'; t.setAttribute('role', 'status'); document.body.appendChild(t); }
   t.textContent = msg; t.hidden = false; clearTimeout(ui.toastT); ui.toastT = setTimeout(() => { t.hidden = true; }, 2600);
@@ -165,6 +195,58 @@ function typeLabel(q) {
   return isXN(q) ? 'QRM · ' + corrLetters(q).length + ' attendues' : 'QRM';
 }
 
+/* ------------------------------------------------------------------ « Comprendre mon erreur » (ChatGPT) */
+/* Pas d'API ni de clé : ouvre ChatGPT avec le prompt prérempli (paramètre ?q=, non documenté officiellement)
+   et copie le prompt dans le presse-papiers en secours. */
+const AI_PROMPTS = {};
+const AI_URL = 'https://chatgpt.com/?q=';
+const AI_MAX_URL = 7000;
+function blocksTxt(list) { return (list || []).map(b => b.img ? '[image non transmise]' : b.t).filter(Boolean).join('\n'); }
+function clip(t, n) { t = String(t || ''); return t.length > n ? t.slice(0, n) + ' […]' : t; }
+function myAnswerText(q, a) {
+  if (q.type === 'QROC') return a && String(a).trim() ? String(a).trim() : 'pas de réponse';
+  if (q.type === 'ASSOC') return q.items.map((it, i) => `${i + 1}→${(a || [])[i] || '—'}`).join(' ; ');
+  const sel = a || []; if (!sel.length) return 'pas de réponse';
+  return sel.map(l => { const p = q.props.find(x => x.l === l); return p ? `${l}. ${p.t}` : l; }).join(' ; ');
+}
+function aiPrompt(q, a, s, ctxMax) {
+  const L = [];
+  L.push('Tu es tuteur d\'un étudiant en médecine français en DFASM qui prépare les EDN.',
+    'Réponds en français, en 8 lignes maximum.',
+    'Appuie-toi uniquement sur les référentiels des Collèges des enseignants (programme R2C des EDN) et sur les recommandations françaises en vigueur (HAS, sociétés savantes françaises), au niveau attendu d\'un étudiant de DFASM.',
+    'Si tu n\'es pas sûr, écris « je ne sais pas » plutôt que d\'inventer. Ne cite une source que si tu peux la nommer précisément (organisme, titre, année).', '');
+  L.push(`Matière : ${q.s.matiere}`);
+  if (q.d.isBlock) {
+    const ctx = blocksTxt(q.d.context);
+    if (ctx) L.push(`Énoncé du dossier (${q.d.id}) :`, clip(ctx, ctxMax));
+    const prev = q.d.questions.filter(x => x.n < q.n).map(x => `Q${x.n} : ${clip(blocksTxt(x.stem), Math.max(200, ctxMax / 4))}`);
+    if (prev.length) L.push('Énoncés des questions précédentes du dossier :', ...prev);
+  }
+  L.push('', `Question ${q.n} (${typeLabel(q)}) :`, blocksTxt(q.stem));
+  if (q.type === 'ASSOC') L.push('Choix :', ...q.props.map(p => `${p.l}. ${p.t}`), 'Éléments à associer :', ...q.items.map((it, i) => `${i + 1}. ${it}`));
+  else if (q.type !== 'QROC') L.push('Propositions :', ...q.props.map(p => `${p.l}. ${p.t}`));
+  L.push('', `Réponse attendue par le corrigé : ${answerText(q)}`);
+  if (q.indisp && q.indisp.length) L.push(`Propositions indispensables : ${q.indisp.join(', ')}`);
+  if (q.inacc && q.inacc.length) L.push(`Propositions inacceptables : ${q.inacc.join(', ')}`);
+  if (q.neutral && q.neutral.length) L.push(`Propositions neutralisées : ${q.neutral.join(', ')}`);
+  if (q.type === 'TCS' && q.weights) L.push(`Répartition du panel d'experts : ${Object.keys(q.weights).map(k => `${k} = ${fmt(q.weights[k])}`).join(', ')}`);
+  if (q.s.unofficial) L.push('Attention : corrigé non officiel (reconstitué par des étudiants).');
+  L.push(`Ma réponse : ${myAnswerText(q, a)} (note obtenue : ${fmtScore(s)} / 1)`);
+  const rem = [...(q.notes || []).filter(Boolean), ...(q.expl || []).map(e => `${e.l} : ${e.t}`)];
+  if (rem.length) L.push('Remarques du corrigé :', ...rem);
+  L.push('', '1. Pour chaque proposition où je me suis trompé, explique en une phrase pourquoi.',
+    '2. Dis si le corrigé te paraît exact, discutable ou erroné, avec la source précise qui le justifie.',
+    '3. Termine par une phrase « À retenir ».');
+  return L.join('\n');
+}
+function aiLink(q, a, s) {
+  const full = aiPrompt(q, a, s, 4000); AI_PROMPTS[q.key] = full;
+  let url = AI_URL + encodeURIComponent(full), short = '';
+  if (url.length > AI_MAX_URL) { url = AI_URL + encodeURIComponent(aiPrompt(q, a, s, 600)); short = 'ctx'; }
+  if (url.length > AI_MAX_URL) { url = 'https://chatgpt.com/'; short = 'all'; }
+  return `<div class="ai-row"><a class="btn sm ghost ai-btn" href="${esc(url)}" target="_blank" rel="noopener noreferrer" data-act="ai" data-key="${esc(q.key)}" data-short="${short}">Comprendre mon erreur <span aria-hidden="true">↗</span></a><span class="small muted">Ouvre ChatGPT (ton compte) et copie la question. ChatGPT peut se tromper.</span></div>`;
+}
+
 /* rendu d'une question. mode : 'answer' | 'review' */
 function renderQuestion(q, a, mode, opts = {}) {
   const review = mode === 'review'; const ro = !!opts.readonly;
@@ -214,6 +296,7 @@ function renderQuestion(q, a, mode, opts = {}) {
     else if (q.scored && !opts.noVerdict) h += `<div class="verdict ${s >= 0.999 ? 'good' : s > 0 ? 'mid' : 'zero'}"><span class="big">${fmtScore(s)} / 1</span><span class="small">${esc(scoreWhy(q, a, s))}</span></div>`;
     const notes = q.notes.filter(Boolean);
     if (notes.length) h += `<div class="notes"><span class="eyebrow">Remarques de correction</span>${notes.map(n => `<p>${esc(n)}</p>`).join('')}</div>`;
+    if (q.scored && typeof s === 'number' && s < 0.999 && !opts.noVerdict) h += aiLink(q, a, s);
   }
   return h;
 }
@@ -251,7 +334,7 @@ function viewReviser() {
   const r = ui.rev; const subs = DATA.subjects.filter(s => s.matiere === r.matiere);
   const units = revUnits(r); const avail = units.reduce((n, u) => n + u.keys.length, 0);
   const nb = units.filter(u => u.block).length;
-  let h = `<header class="top"><div class="brand"><span class="brand-mark">A·B·C·D·E</span></div><h1>Réviser<span class="sub">Questions au hasard, correction immédiate</span></h1></header>`;
+  let h = `<header class="top"><div class="brand"><span class="brand-mark">A·B·C·D·E</span></div><h1>Réviser<span class="sub">Questions au hasard, correction immédiate</span></h1></header>` + cycleBar();
   if (!storageOK) h += `<div class="banner">Le stockage de ce navigateur est indisponible : ta progression ne sera pas conservée.</div>`;
   h += `<section class="panel"><span class="eyebrow">Matière</span><div class="chips">${MATIERES.map(m => `<button class="chip" data-act="rev-mat" data-v="${esc(m)}" aria-pressed="${r.matiere === m}">${esc(m)}</button>`).join('')}</div></section>`;
   h += `<section class="panel"><span class="eyebrow">Nombre de questions</span><div class="row">${[10, 25, 50].map(v => `<button class="chip" data-act="rev-n" data-v="${v}" aria-pressed="${r.n === v}">${v}</button>`).join('')}<label class="row small" for="rev-n-in">Autre <input class="num-input" id="rev-n-in" type="number" min="1" max="300" inputmode="numeric" value="${[10, 25, 50].includes(r.n) ? '' : r.n}" data-act="rev-n-in"></label></div>
@@ -367,7 +450,7 @@ function prevStems(q) {
 }
 function carnetList(f) {
   return Object.keys(store.carnet).filter(k => QIDX[k]).map(k => ({ k, e: store.carnet[k], q: QIDX[k] }))
-    .filter(x => (f.matiere === 'all' || x.q.s.matiere === f.matiere) && (f.status === 'mastered' ? x.e.archived : !x.e.archived) && (f.cause === 'all' || (f.cause === 'none' ? !x.e.cause : x.e.cause === f.cause)))
+    .filter(x => x.q.s.cycle === ui.cycle && (f.matiere === 'all' || x.q.s.matiere === f.matiere) && (f.status === 'mastered' ? x.e.archived : !x.e.archived) && (f.cause === 'all' || (f.cause === 'none' ? !x.e.cause : x.e.cause === f.cause)))
     .sort((a, b) => (f.status === 'mastered' ? b.e.archivedAt - a.e.archivedAt : b.e.lastWrong - a.e.lastWrong));
 }
 function canProgressToday(e) { const dk = dayKey(Date.now()); return dk !== dayKey(e.lastWrong) && dk !== e.okDay; }
@@ -375,7 +458,7 @@ function viewCarnet() {
   const f = ui.carnet; const fm = { matiere: f.matiere, status: 'active', cause: 'all' };
   const active = carnetList(fm); const ready = active.filter(x => canProgressToday(x.e)).length;
   const mastered = carnetList({ matiere: f.matiere, status: 'mastered', cause: 'all' }).length;
-  let h = `<header class="top"><h1>Carnet d'erreurs<span class="sub">${active.length} à retravailler · ${mastered} maîtrisée${mastered > 1 ? 's' : ''}</span></h1></header>`;
+  let h = `<header class="top"><h1>Carnet d'erreurs<span class="sub">${esc(cycleLabel(ui.cycle))} · ${active.length} à retravailler · ${mastered} maîtrisée${mastered > 1 ? 's' : ''}</span></h1></header>` + cycleBar();
   h += `<section class="panel"><div class="chips">${[['all', 'Toutes matières'], ...MATIERES.map(m => [m, m])].map(([k, l]) => `<button class="chip" data-act="carnet-mat" data-v="${esc(k)}" aria-pressed="${f.matiere === k}">${esc(l)}</button>`).join('')}</div>`;
   if (active.length) {
     h += `<span class="eyebrow">Refaire mes erreurs</span><div class="chips">${[[10, '10'], [20, '20'], [0, 'Toutes']].map(([v, l]) => `<button class="chip" data-act="carnet-n" data-v="${v}" aria-pressed="${f.n === v}">${l}</button>`).join('')}</div>
@@ -457,7 +540,7 @@ function statusPill(st) {
   return '<span class="pill none">Jamais fait</span>';
 }
 function viewSujets() {
-  let h = `<header class="top"><h1>Sujets<span class="sub">Mode examen : le sujet complet, la note à la fin</span></h1></header>`;
+  let h = `<header class="top"><h1>Sujets<span class="sub">Mode examen : le sujet complet, la note à la fin</span></h1></header>` + cycleBar();
   MATIERES.forEach(m => {
     h += `<h2 class="section-title">${esc(m)}</h2><div class="list">`;
     DATA.subjects.filter(s => s.matiere === m).forEach(s => {
@@ -598,7 +681,7 @@ function viewResultDetail() {
 
 /* ------------------------------------------------------------------ onglet Progression */
 function viewProgression() {
-  let h = `<header class="top"><h1>Progression<span class="sub">Tout est enregistré sur cet appareil uniquement</span></h1></header>`;
+  let h = `<header class="top"><h1>Progression<span class="sub">${esc(cycleLabel(ui.cycle))} · enregistré sur cet appareil uniquement</span></h1></header>` + cycleBar();
   MATIERES.forEach(m => {
     const subs = DATA.subjects.filter(s => s.matiere === m);
     const keys = subs.flatMap(s => subjQuestions(s).filter(q => q.scored).map(q => q.key));
@@ -642,7 +725,8 @@ function viewReglages() {
 /* ------------------------------------------------------------------ rendu principal */
 function render(scrollTop) {
   const sc = ui.screen; let h, tabs = true;
-  if (!sc) h = { reviser: viewReviser, sujets: viewSujets, carnet: viewCarnet, progression: viewProgression, reglages: viewReglages }[ui.tab]();
+  if (!sc && !ui.cycle && ui.tab !== 'reglages') h = viewCycleChoice();
+  else if (!sc) h = { reviser: viewReviser, sujets: viewSujets, carnet: viewCarnet, progression: viewProgression, reglages: viewReglages }[ui.tab]();
   else {
     tabs = sc.type === 'subject';
     h = { rev: viewRevSession, revsum: viewRevSummary, subject: viewSubject, exam: viewExamSommaire, dossier: viewExamDossier, eval: viewExamEval, results: viewResults, detail: viewResultDetail, cdetail: viewCarnetDetail }[sc.type]();
@@ -678,7 +762,14 @@ app.addEventListener('click', e => {
   const sc = ui.screen;
   switch (act) {
     case 'tab': ui.tab = el.dataset.tab; ui.screen = null; render(true); break;
+    case 'cycle': setCycle(el.dataset.v, true); ui.screen = null; toast(`Cycle ${cycleLabel(el.dataset.v)}`); render(true); break;
     case 'zoom': openZoom(el.getAttribute('src')); break;
+    case 'ai': {
+      const txt = AI_PROMPTS[el.dataset.key] || '';
+      const msg = el.dataset.short === 'all' ? 'Dossier trop long pour le lien : prompt copié, colle-le dans ChatGPT.' : el.dataset.short === 'ctx' ? 'Énoncé raccourci dans le lien. Version complète copiée : colle-la si besoin.' : 'Prompt copié aussi : si ChatGPT s\'ouvre vide, colle-le.';
+      try { navigator.clipboard.writeText(txt).then(() => toast(msg), () => toast('ChatGPT ouvert. Copie impossible ici.')); } catch (err) { toast('ChatGPT ouvert. Copie impossible ici.'); }
+      break;
+    }
     /* réglages de révision */
     case 'rev-mat': ui.rev.matiere = el.dataset.v; ui.rev.subjects = null; render(); break;
     case 'rev-n': ui.rev.n = +el.dataset.v; render(); break;
@@ -806,7 +897,7 @@ function openZoom(src) {
 document.addEventListener('keydown', e => { if (e.key === 'Escape') { const z = document.querySelector('.zoom'); if (z) z.remove(); } });
 
 /* exposé pour les tests */
-window.__annales = { scoreQ, normTxt, qrocAuto, drawUnits, revUnits, QIDX, SUBJ, isXN, maxSel, carnetRecord, dayKey, get store() { return store; } };
+window.__annales = { aiPrompt, AI_PROMPTS, setCycle, CYCLES, get cycle() { return ui.cycle; }, scoreQ, normTxt, qrocAuto, drawUnits, revUnits, QIDX, SUBJ, isXN, maxSel, carnetRecord, dayKey, get store() { return store; } };
 migrateCarnet();
 render(true);
 })();
